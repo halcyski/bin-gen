@@ -6,6 +6,6 @@ output = "riscv64-le.elf"
 format = "elf"
 
 cflags = [
- "-O0"
- "-g"
+ "-O0",
+ "-g",
 ]

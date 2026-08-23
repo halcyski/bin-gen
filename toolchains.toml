@@ -5,9 +5,9 @@
 
 [toolchains.risc64-linux]
 packages = [
- "gcc-riscv64-linux-gnu"
- "binutils-riscv64-linux-gnu"
- "libc6-dev-riscv64-cross"
+ "gcc-riscv64-linux-gnu",
+ "binutils-riscv64-linux-gnu",
+ "libc6-dev-riscv64-cross",
 ]
 
 cc = "riscv64-linux-gnu-gcc"
