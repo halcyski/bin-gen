@@ -1,11 +1,24 @@
-[targets.riscv64-linux-elf]
+[targets.riscv64-linux-elf-addition]
 toolchain = "riscv64-linux"
 
-source = "src/basic.c"
-output = "riscv64-le.elf"
+# define multiple sources to be compiled 
+sources = ["src/basic.c"]
+output = "riscv64-le-addition.elf"
 format = "elf"
 
 cflags = [
  "-O0",
  "-g",
+]
+
+[targerts.riscv64-linux-elf-hello-world]
+toolchain = "riscv64-linux"
+
+sources = ["src/hello-world.c"]
+output = "riscv64-le-hello-world"
+format = "elf"
+
+cflags = [
+ "-O0"
+ "-g"
 ]
