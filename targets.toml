@@ -1,0 +1,11 @@
+[targets.riscv64-linux-elf]
+toolchain = "riscv64-linux"
+
+source = "src/basic.c"
+output = "riscv64-le.elf"
+format = "elf"
+
+cflags = [
+ "-O0"
+ "-g"
+]

@@ -1,0 +1,18 @@
+# use this file to define the tool chains that 
+# docker should use for each target arch.
+#
+# hopefully will allow for easy addition of arches
+
+[toolchains.risc64-linux]
+packages = [
+ "gcc-riscv64-linux-gnu"
+ "binutils-riscv64-linux-gnu"
+ "libc6-dev-riscv64-cross"
+]
+
+cc = "riscv64-linux-gnu-gcc"
+readelf = "riscv64-linux-gnu-readelf"
+objcopy = "riscv64-linux-gnu-objcopy"
+
+
+
