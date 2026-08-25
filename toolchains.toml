@@ -3,7 +3,7 @@
 #
 # hopefully will allow for easy addition of arches
 
-[toolchains.risc64-linux]
+[toolchains.riscv64-linux]
 packages = [
  "gcc-riscv64-linux-gnu",
  "binutils-riscv64-linux-gnu",
