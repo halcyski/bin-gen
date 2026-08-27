@@ -1,35 +1,28 @@
 # defining a new binary target:
 # [target.ARCH.BINARY-NAME]
 # toolchain = "toolchain-from.toml"
-# 
 # source = ["invocation/path.c"]
-# output = "BINARY-NAME.out"
-# format = "bin"
-# 
+# out = "out/path/file"
+# formats = [ ... "elf", ...]
 # cflags = [ ... ]
+# 
+# you must add to the dataclasses inside 
+# of the bin-generator script to add more traits to targets 
 
-
-[target.riscv64.linux-elf-addition]
+[target.riscv64.addition]
 toolchain = "riscv64-linux"
 
-# define multiple sources to be compiled 
 sources = ["src/basic.c"]
-output = "riscv64-le-addition.elf"
-format = "elf"
+out = "out/riscv64/addition"
+formats = ["elf", "bin", "ihex", "srec"]
 
-cflags = [
- "-O0",
- "-g",
-]
+cflags = ["-O0", "-g",]
 
-[target.riscv64.linux-elf-hello-world]
+[target.riscv64.hello-world]
 toolchain = "riscv64-linux"
 
 sources = ["src/hello-world.c"]
-output = "riscv64-le-hello-world"
-format = "elf"
+out = "out/riscv64/hello-world"
+formats = ["elf", "bin", "ihex", "srec"]
 
-cflags = [
- "-O0",
- "-g",
-]
+cflags = ["-O0", "-g",]
