@@ -4,6 +4,8 @@ import tomllib
 import argparse 
 from dataclasses import dataclass 
 from pathlib import Path
+from typing import Literal
+import shlex 
 
 SUPPORTED_FORMATS = {
         "elf",
@@ -17,6 +19,28 @@ OBJCOPY_FORMATS = {
         "ihex",
         "srec",
 }
+
+@dataclass(frozen=True)
+class LinkedFormatRule:
+    ext: str
+    kind: Literal["linked"] = "linked"
+
+@dataclass(frozen=True)
+class ObjcopyFormatRule:
+    ext: str
+    from_format: str
+    objcopy_format: str
+    kind: Literal["objcopy"] = "objcopy"
+
+FormatRule = LinkedFormatRule | ObjcopyFormatRule
+
+FORMAT_RULES: dict[str, FormatRule] = {
+        "elf": LinkedFormatRule(ext=".elf"),
+        "bin": ObjcopyFormatRule(from_format="elf", objcopy_format="binary", ext=".bin"),
+        "ihex": ObjcopyFormatRule(from_format="elf",objcopy_format="ihex", ext=".hex"),
+        "srec": ObjcopyFormatRule(from_format="elf", objcopy_format="srec", ext=".srec"),
+}
+
 
 @dataclass(frozen=True)
 class Target:
@@ -127,7 +151,97 @@ def load_targets(raw, toolchains):
                 formats=formats,
                 cflags=cflags,
             ))
-        return results, errors
+    return results, errors
+
+
+@dataclass(frozen=True)
+class Command:
+    argv: list[str]
+
+    def shell(self) -> str:
+        return shlex.join(self.argv)
+
+class TargetCommandBuilder:
+    def __init__(self, target: Target, toolchain: Toolchain):
+        self.target = target 
+        self.toolchain = toolchain
+    
+    def commands(self) -> list[Command]:
+        commands = []
+
+        if self.needs_elf():
+            commands.append(self.link_command("elf"))
+    
+        for format in self.target.formats:
+            if format == "elf":
+                continue 
+
+            rule = FORMAT_RULES[format]
+
+            if rule.kind == "linked":
+                commands.append(self.link_command(format))
+            elif rule.kind == "objcopy":
+                commands.append(self.objcopy_command(format))
+            else:
+                raise AssertionError(f"unkown rule kind: {rule.kind}")
+        return commands
+
+    def needs_elf(self):
+        return ("elf" in self.target.formats 
+                or any(FORMAT_RULES[format].kind == "objcopy" for format in self.target.formats)
+                )
+    def output_path(self, format: str) -> str: 
+        return self.target.out + FORMAT_RULES[format].ext
+
+    def link_command(self, format: str) -> Command:
+        rule = FORMAT_RULES[format]
+
+        if not isinstance(rule, LinkedFormatRule):
+            raise TypeError(f"{format!r} is not a linked format")
+
+        return Command([
+            self.toolchain.cc,
+            *self.target.cflags,
+            *self.target.sources,
+            "-o",
+            self.output_path(format),
+            ])
+
+    def objcopy_command(self, format: str) -> Command: 
+        rule = FORMAT_RULES[format]
+
+        if not isinstance(rule, ObjcopyFormatRule):
+            raise TypeError(f"{format!r} is not an objcopy format")
+
+        if self.toolchain.objcopy is None:
+            raise ValueError(f"{self.target.name}: format {format!r} requires objcopy")
+
+        return Command([
+            self.toolchain.objcopy,
+            "-O",
+            rule.objcopy_format,
+            self.output_path(rule.from_format),
+            self.output_path(format),
+            ])
+
+
+class DockerCommandBuilder:
+    def __init__(self, image: str, workspace: Path):
+        self.image = image
+        self.workspace = workspace
+
+    def wrap(self, command: Command) -> Command:
+        return Command([
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{self.workspace}:/workspace",
+            "-w",
+            "/workspace",
+            self.image,
+            *command.argv,
+        ])
 
 
 # input target.toml 
@@ -136,14 +250,19 @@ def main():
     parser.add_argument("targets", type=str, help="path to targets.toml where binary generation specs are defined")
     parser.add_argument("toolchains", type=str, help="path to toolchains.toml")
     parser.add_argument("--binary", nargs='+', help="list specific binaries to be built")
-    parser.add_argument("--family", nargs='*', help="list families of binaries to be built (i.e. riscv64)")
-
+    parser.add_argument("--family", nargs='+', help="list families of binaries to be built (i.e. riscv64)")
+    parser.add_argument("--docker", action="store_true", help="if commands should be output to be run on docker")
+    parser.add_argument("--image", type=str, help="the docker image the commands should be run on")
+    
     args = parser.parse_args()
     
     if args.binary and args.family:
         print("cannot specify both family and binary")
         sys.exit(1)
-        return  
+        return
+
+    if args.docker and not args.image:
+        print("You must specify an image if you configure for docker")
     
     
     with open(args.targets, "rb") as f:
@@ -160,10 +279,31 @@ def main():
     if errors:
         for error in errors:
             print(f"TOML parse error: {error}", file=sys.stderr)
+        sys.exit(1)
 
-    for target in targets:
-        print(target.name)
+    if not targets:
+        raise AssertionError("No targets found")
 
+    
+
+    #TODO: target selection based on cli flags 
+    selected_targets = targets
+    
+    docker_builder = DockerCommandBuilder(workspace=Path(Path.cwd()), image=args.image)
+    
+    commands = []
+    for target in selected_targets:
+        toolchain = toolchains[target.toolchain]
+        builder = TargetCommandBuilder(target, toolchain)
+
+        for command in builder.commands():
+            if args.docker:
+                command = docker_builder.wrap(command)
+            commands.append(command)
+
+    for command in commands:
+        print(command.shell())
+    
     
  
 if __name__ == '__main__':
