@@ -167,7 +167,7 @@ class TargetCommandBuilder:
         if self.needs_elf():
             commands.append(self.link_command("elf"))
     
-        for format in self.target.formats:
+        for format in dict.fromkeys(self.target.formats):
             if format == "elf":
                 continue 
 
