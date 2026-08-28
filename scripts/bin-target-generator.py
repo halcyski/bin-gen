@@ -312,7 +312,7 @@ def main():
 
         family_selected = args.family is not None and target.arch in args.family
         binary_selected = args.binary is not None and target_binary in args.binary 
-        if (args.family is None and args.binary is None) or (family_selected or binary_selected or args.all):
+        if family_selected or binary_selected or args.all:
             selected_targets.append(target)
 
     if args.docker:
