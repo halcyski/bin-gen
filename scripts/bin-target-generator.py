@@ -249,21 +249,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("targets", type=str, help="path to targets.toml where binary generation specs are defined")
     parser.add_argument("toolchains", type=str, help="path to toolchains.toml")
-    parser.add_argument("--binary", nargs='+', help="list specific binaries to be built")
+    parser.add_argument("--binary", nargs='+', help="list specific binaries to be built as arch.name, e.g. riscv64.bootloader")
     parser.add_argument("--family", nargs='+', help="list families of binaries to be built (i.e. riscv64)")
     parser.add_argument("--docker", action="store_true", help="if commands should be output to be run on docker")
     parser.add_argument("--image", type=str, help="the docker image the commands should be run on")
     
     args = parser.parse_args()
     
-    if args.binary and args.family:
-        print("cannot specify both family and binary")
-        sys.exit(1)
-        return
-
     if args.docker and not args.image:
-        print("You must specify an image if you configure for docker")
-    
+        parser.error("You must specify an image if you configure for docker")
     
     with open(args.targets, "rb") as f:
         targets_config = tomllib.load(f) 
@@ -283,14 +277,41 @@ def main():
 
     if not targets:
         raise AssertionError("No targets found")
+    
+    known_families = {target.arch for target in targets}
+    known_binaries = {f"{target.arch}.{target.name}" for target in targets}
+    
+    if args.family is not None: 
+        unknown = set(args.family) - known_families
+        if unknown:
+            print(f"Unknown family/families: {', '.join(sorted(unknown))}",
+                  file=sys.stderr)
+            print(f"Known families: {', '.join(sorted(known_families))}",
+                  file=sys.stderr)
+            sys.exit(1)
+    
+    if args.binary is not None:
+        unknown = set(args.binary) - known_binaries
+        if unknown:
+            print(f"Unknown binary/binaries: {', '.join(sorted(unknown))}",
+                  file=sys.stderr)
+            print(f"Known binaries: {', '.join(sorted(known_binaries))}",
+                  file=sys.stderr)
+            sys.exit(1)
 
+    selected_targets = []
     
+    for target in targets:
+        target_binary = f"{target.arch}.{target.name}"
 
-    #TODO: target selection based on cli flags 
-    selected_targets = targets
-    
-    docker_builder = DockerCommandBuilder(workspace=Path(Path.cwd()), image=args.image)
-    
+        family_selected = args.family is not None and target.arch in args.family
+        binary_selected = args.binary is not None and target_binary in args.binary 
+        if (args.family is None and args.binary is None) or family_selected or binary_selected:
+            selected_targets.append(target)
+
+    if args.docker:
+        docker_builder = DockerCommandBuilder(workspace=Path.cwd(), image=args.image)
+ 
     commands = []
     for target in selected_targets:
         toolchain = toolchains[target.toolchain]
