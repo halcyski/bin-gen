@@ -4,7 +4,6 @@ import tomllib
 import argparse 
 from dataclasses import dataclass 
 from pathlib import Path
-from typing import Literal
 import shlex 
 import subprocess 
 
@@ -24,14 +23,12 @@ OBJCOPY_FORMATS = {
 @dataclass(frozen=True)
 class LinkedFormatRule:
     ext: str
-    kind: Literal["linked"] = "linked"
 
 @dataclass(frozen=True)
 class ObjcopyFormatRule:
     ext: str
     from_format: str
     objcopy_format: str
-    kind: Literal["objcopy"] = "objcopy"
 
 FormatRule = LinkedFormatRule | ObjcopyFormatRule
 
@@ -175,19 +172,20 @@ class TargetCommandBuilder:
                 continue 
 
             rule = FORMAT_RULES[format]
-
-            if rule.kind == "linked":
+            
+            # maybe replace with actual OOP dynamic dispatch
+            # this is fine for now 
+            if isinstance(rule, LinkedFormatRule):
                 commands.append(self.link_command(format))
-            elif rule.kind == "objcopy":
+            elif isinstance(rule, ObjcopyFormatRule):
                 commands.append(self.objcopy_command(format))
             else:
-                raise AssertionError(f"unkown rule kind: {rule.kind}")
+                raise TypeError(f"unkown rule kind: {type(rule)}")
         return commands
 
     def needs_elf(self):
         return ("elf" in self.target.formats 
-                or any(FORMAT_RULES[format].kind == "objcopy" for format in self.target.formats)
-                )
+                or any(isinstance(FORMAT_RULES[format], ObjcopyFormatRule) for format in self.target.formats))
     def output_path(self, format: str) -> str: 
         return self.target.out + FORMAT_RULES[format].ext
 
