@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 import shlex 
+import subprocess 
 
 SUPPORTED_FORMATS = {
         "elf",
@@ -253,7 +254,8 @@ def main():
     parser.add_argument("--family", nargs='+', help="list families of binaries to be built (i.e. riscv64)")
     parser.add_argument("--docker", action="store_true", help="if commands should be output to be run on docker")
     parser.add_argument("--image", type=str, help="the docker image the commands should be run on")
-    
+    parser.add_argument("--execute", action="store_true", help="execute generated commands instead of printing them")
+
     args = parser.parse_args()
     
     if args.docker and not args.image:
@@ -314,6 +316,8 @@ def main():
  
     commands = []
     for target in selected_targets:
+        if args.execute: 
+            Path(target.out).parent.mkdir(parents=True, exist_ok=True)
         toolchain = toolchains[target.toolchain]
         builder = TargetCommandBuilder(target, toolchain)
 
@@ -324,7 +328,8 @@ def main():
 
     for command in commands:
         print(command.shell())
-    
+        if args.execute:
+            subprocess.run(command.argv, check=True)
     
  
 if __name__ == '__main__':
