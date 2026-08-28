@@ -248,6 +248,24 @@ def check_source_files(target: Target, errors):
             b_source_error = True 
     return b_source_error
 
+def load_toml_file(path: str) -> dict:
+    try: 
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError: 
+            print(f"TOML file not found at {path!r}", file=sys.stderr)
+            sys.exit(1)
+    except IsADirectoryError:
+            print(f"Expected a TOML but found a directory: {path!r}", file=sys.stderr)
+            sys.exit(1)
+    except PermissionError:
+            print(f"Permission denied reading TOML at {path!r}", file=sys.stderr)
+            sys.exit(1)
+    except tomllib.TOMLDecodeError as e:
+            print(f"Invalid TOML in {path!r}: {e}", file=sys.stderr)
+            sys.exit(1)
+            
+
 # input target.toml 
 def main():
     parser = argparse.ArgumentParser()
@@ -267,13 +285,9 @@ def main():
 
     if args.docker and not args.image:
         parser.error("You must specify an image if you configure for docker")
-    
-    with open(args.targets, "rb") as f:
-        targets_config = tomllib.load(f) 
-    
-    with open(args.toolchains, "rb") as f:
-        toolchains_config = tomllib.load(f)
-    
+    targets_config = load_toml_file(args.targets)
+    toolchains_config = load_toml_file(args.toolchains)
+
     toolchains, toolchains_errors = load_toolchains(toolchains_config)
     targets, targets_errors = load_targets(targets_config, toolchains)
 
