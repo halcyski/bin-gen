@@ -140,9 +140,6 @@ def load_targets(raw, toolchains):
                 tc = toolchains.get(toolchain)
                 if tc and not tc.objcopy:
                     errors.append(f"{path}: objcopy is required for this format, but toolchain {toolchain!r} has none")
-            for source in sources:
-                if not Path(source).is_file():
-                    errors.append(f"{path}.sources: missing source file {source!r}")
             results.append(Target(
                 arch=arch,
                 name=name, 
@@ -245,6 +242,14 @@ class DockerCommandBuilder:
         ])
 
 
+def check_source_files(target: Target, errors):
+    b_source_error = False
+    for source in target.sources:
+        if not Path(source).is_file():
+            errors.append(f"{target.arch}.{target.name}: could not locate {source}")
+            b_source_error = True 
+    return b_source_error
+
 # input target.toml 
 def main():
     parser = argparse.ArgumentParser()
@@ -306,15 +311,24 @@ def main():
             sys.exit(1)
 
     selected_targets = []
-    
+    selected_target_errors = []
+
     for target in targets:
+        if check_source_files(target, selected_target_errors): 
+            continue 
+
         target_binary = f"{target.arch}.{target.name}"
 
         family_selected = args.family is not None and target.arch in args.family
         binary_selected = args.binary is not None and target_binary in args.binary 
         if family_selected or binary_selected or args.all:
             selected_targets.append(target)
-
+    
+    if selected_target_errors: 
+        for error in selected_target_errors:
+            print(f"Source location error: {error}", file=sys.stderr)
+        sys.exit(1)
+        
     if args.docker:
         docker_builder = DockerCommandBuilder(workspace=Path.cwd(), image=args.image)
  
