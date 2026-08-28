@@ -255,9 +255,13 @@ def main():
     parser.add_argument("--docker", action="store_true", help="if commands should be output to be run on docker")
     parser.add_argument("--image", type=str, help="the docker image the commands should be run on")
     parser.add_argument("--execute", action="store_true", help="execute generated commands instead of printing them")
+    parser.add_argument("--all", action="store_true", help="build all valid targets")
 
     args = parser.parse_args()
     
+    if not args.all and args.family is None and args.binary is None:
+        parser.error("select at least one of: --all, --family, or --binary")
+
     if args.docker and not args.image:
         parser.error("You must specify an image if you configure for docker")
     
@@ -308,7 +312,7 @@ def main():
 
         family_selected = args.family is not None and target.arch in args.family
         binary_selected = args.binary is not None and target_binary in args.binary 
-        if (args.family is None and args.binary is None) or family_selected or binary_selected:
+        if (args.family is None and args.binary is None) or (family_selected or binary_selected or args.all):
             selected_targets.append(target)
 
     if args.docker:
