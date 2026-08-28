@@ -130,7 +130,7 @@ def load_targets(raw, toolchains):
                 cflags = []
             if toolchain and toolchain not in toolchains:
                 errors.append(f"{path}.toolchain: unkown toolchain {toolchain!r}")
-            for format in formats:
+            for format in dict.fromkeys(formats):
                 if format not in SUPPORTED_FORMATS:
                     errors.append(f"{path}.formats: unsupported/unknown format {format!r}")
             if any(format in OBJCOPY_FORMATS for format in formats):
