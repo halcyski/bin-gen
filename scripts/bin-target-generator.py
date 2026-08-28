@@ -326,15 +326,16 @@ def main():
     selected_target_errors = []
 
     for target in targets:
-        if check_source_files(target, selected_target_errors): 
-            continue 
-
         target_binary = f"{target.arch}.{target.name}"
 
         family_selected = args.family is not None and target.arch in args.family
         binary_selected = args.binary is not None and target_binary in args.binary 
-        if family_selected or binary_selected or args.all:
-            selected_targets.append(target)
+        if not (family_selected or binary_selected or args.all):
+            continue 
+        if check_source_files(target, selected_target_errors): 
+            continue 
+        
+        selected_targets.append(target)
     
     if selected_target_errors: 
         for error in selected_target_errors:
