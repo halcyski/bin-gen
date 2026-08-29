@@ -19,6 +19,29 @@ def load_toml_file(path: str) -> dict:
     except tomllib.TOMLDecodeError as e:
         raise ConfigError([f"{path}: TOML parse error: {e}"])
 
+def decode_string_list(
+    raw: object,
+    path: str,
+    errors: list[str],
+    min_items: int = 0,) -> tuple[str, ...]:
+    if not isinstance(raw, list):
+        errors.append(
+                f"{path}: expected list of strings")
+        return ()
+    if len(raw) < min_items:
+        errors.append(
+                f"{path}: expected at least {min_items} item(s)")
+        return ()
+
+    result: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str) or not item.strip():
+            errors.append(
+                    f"{path}[{index}]: expected non-empty string")
+            continue
+        result.append(item)
+    return tuple(result)
+
 TomlTable: TypeAlias = dict[str, object]
 
 _MISSING = object()
@@ -48,30 +71,17 @@ class TableReader:
             return _MISSING 
         return self.values[key]
 
-    def _decode_strings(
-            self,
-            key: str,
-            value: object,
-            *,
-            min_items: int,
-            ) -> tuple[str, ...]:
-        if not isinstance(value, list):
-            self.errors.append(
-                    f"{self.path}.{key}: expected list of strings")
-            return ()
-        if len(value) < min_items:
-            self.errors.append(
-                    f"{self.path}.{key}: expected at least {min_items} item(s)")
-            return ()
-
-        result: list[str] = []
-        for index, item in enumerate(value):
-            if not isinstance(item, str) or not item.strip():
-                self.errors.append(
-                        f"{self.path}.{key}[{index}]: expected non-empty string")
-                continue
-            result.append(item)
-        return tuple(result)
+    def decode_strings(
+        self,
+        key: str,
+        value: object,
+        *,
+        min_items: int,) -> tuple[str, ...]:
+            return decode_string_list(
+                    value,
+                    f"{self.path}.{key}",
+                    self.errors,
+                    min_items=min_items)
 
     def required_str(self, key: str) -> str:
         value = self._required_value(key)
@@ -127,13 +137,13 @@ class TableReader:
         if value is _MISSING:
             return ()
 
-        return self._decode_strings(
+        return self.decode_strings(
                 key, 
                 value,
                 min_items=min_items,
                 )
 
-    def optional_string(
+    def optional_strings(
             self,
             key: str, 
             *,
@@ -145,7 +155,7 @@ class TableReader:
         if key not in self.values:
             return default 
 
-        return self._decode_strings(
+        return self.decode_strings(
                 key,
                 self.values[key],
                 min_items=min_items,)
