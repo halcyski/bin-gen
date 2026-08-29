@@ -1,32 +1,43 @@
 from pathlib import Path
 
-from .table_reader import ConfigError, TableReader
+from .table_reader import (
+        ConfigError, 
+        TableReader, 
+        decode_string_list,
+)
+
 from .model import (
     ArtifactFormat,
     Environment,
     EnvironmentKind,
     PackageManager,
+    ProductKind,
     Target,
+    TargetsConfig,
     Tool,
     ToolCapability,
     Toolchain,
+    ToolchainConvention,
     ToolchainsConfig,
 )
 
 TOOLCHAINS_SCHEMA_VERSION = 1
 TARGETS_SCHEMA_VERSION = 1
 
+
+
+
 class ToolchainSchemaDecoder:
 
     def decode_toolchains(
             self,
             raw: object,
-            path: Path,) -> ToolchainsConfig | None:
+            path: Path,) -> ToolchainsConfig:
         errors: list[str] = [] 
         root_path = str(path)
         reader = TableReader(raw, root_path, errors)
         schema_version = reader.required_int("schema_version")
-        environments_raw = reader.requried_table("environments")
+        environments_raw = reader.required_table("environments")
         toolchains_raw = reader.required_table("toolchains")
 
         reader.finish()
@@ -81,7 +92,7 @@ class ToolchainSchemaDecoder:
 
         environment_raw = reader.required_str("environment")
         target_triple = reader.required_str("target_triple")
-        convention = reader.required_str("convention")
+        convention_raw = reader.required_str("convention")
         tools_raw = reader.required_table("tools")
 
         reader.finish()
@@ -93,18 +104,25 @@ class ToolchainSchemaDecoder:
                     f"{path}.environment: unknown environment")
             return None 
 
+        try:
+            convention = ToolchainConvention(convention_raw)
+        except ValueError:
+            errors.append(f"{path}.convention: unknown convention: {convention_raw!r}")
+            return None 
+
 
         tools: dict[ToolCapability, Tool] = {} 
         for capability_name, raw_tool in tools_raw.items():
+            capability_path = f"{path}.tools.{capability_name}"
             try: 
                 capability = ToolCapability(capability_name)
             except ValueError:
                 errors.append(
-                        f"{path}.{capability_name}: unknown tool capability")
+                        f"{path}.{capability_path}: unknown tool capability")
                 continue 
             tools[capability] = self.decode_tool(
                     raw=raw_tool,
-                    path=f"{path}.{capability_name}",
+                    path=capability_path,
                     errors=errors,)
 
         if len(errors) != initial_error_count:
@@ -146,7 +164,7 @@ class ToolchainSchemaDecoder:
             manager = PackageManager(manager_raw)
         except ValueError: 
             errors.append(
-                    f"{path}.manager: unsupported package manager {manager_raw!r}")
+                    f"{path}.pacakage_manager: unsupported package manager {manager_raw!r}")
         
         if len(errors) != initial_error_count:
             return None
@@ -176,22 +194,127 @@ class ToolchainSchemaDecoder:
 class TargetSchemaDecoder:
     def __init__(self, toolchains: dict[str, Toolchain]):
         self.toolchains = toolchains 
-    
-    def decode_target(
-            self,
+
+    def decode_targets(
+            self, 
+            raw: object, 
             path: str,
-            raw: object,
-            errors: list[str]) -> Target:
-        reader = TableReader(raw, path, errors)
-        
-        toolchain = self.decode_toolchain(raw, path, errors)
+            ) -> TargetsConfig: 
+        errors: list[str] = [] 
+        root_path = str(path)
+        reader = TableReader(raw, root_path, errors)
+        schema_version = reader.required_int("schema_version")
+        targets_raw = reader.required_table("target")
 
-        sources_raw = reader.required_strings("sources")
-        out_raw = reader.required_str("out")
-        formats_raw = reader.required_strings("formats")
-
-        tool_args = self.decode_tool_args(raw, path, errors)
         reader.finish()
         
+        if schema_version != TARGETS_SCHEMA_VERSION:
+            errors.append(f"{path}.schema_version: version mismatch, expected: {TARGETS_SCHEMA_VERSION}, got {schema_version}")
+            raise ConfigError(errors) 
+        
+        targets: list[Target] = []
+        for arch, arch_targets in targets_raw.items():
+            arch_path = f"{root_path}.target.{arch}"
+
+            if not isinstance(arch_targets, dict):
+                errors.append(f"{arch_path}: expected table")
+                continue 
+            
+            for target_name, raw_target in arch_targets.items():
+                target: Target | None = self.decode_target(
+                        arch=arch,
+                        name=target_name,
+                        path=f"{arch_path}.{target_name}",
+                        raw=raw_target,
+                        errors=errors,)
+                if target is None:
+                    continue 
+                targets.append(target)
+
+        if errors:
+            raise ConfigError(errors)
+        
+        return TargetsConfig(
+                schema_version=schema_version,
+                root=Path(root_path),
+                targets=tuple(targets),
+                )
+
+
+    def decode_target(
+            self,
+            arch: str,
+            name: str,
+            path: str,
+            raw: object,
+            errors: list[str]) -> Target | None:
+        initial_error_count = len(errors)
+        reader = TableReader(raw, path, errors)
+        
+        toolchain_raw = reader.required_str("toolchain")
+        product_raw = reader.required_str("product")
+        sources_raw = reader.required_strings("sources")
+        output = reader.required_str("output")
+        formats_raw = reader.required_strings("formats")
+        tool_args_raw = reader.optional_table("tool_args")
+        
+        reader.finish()
+        
+        try:
+            toolchain: Toolchain = self.toolchains[toolchain_raw]
+        except KeyError:
+            errors.append(
+                    f"{path}.toolchain: unknown toolchain specified: {toolchain_raw!r}")
+            return None 
+    
+        try: 
+            product = ProductKind(product_raw)
+        except ValueError:
+            errors.append(f"{path}.product: unknown product kind: {product_raw!r}")
+        
+        sources = tuple(Path(source) for source in sources_raw)
+        
+        formats: list[ArtifactFormat] = [] 
+        for fmt in formats_raw:
+            try: 
+                format = ArtifactFormat(fmt)
+            except ValueError:
+                errors.append(f"{path}.formats: unknown format: {fmt!r}")
+                continue 
+            formats.append(format)
+
+        tool_args: dict[ToolCapability, tuple[str, ...]] = {}
+        for capability_raw, flags_raw in tool_args_raw.items():
+            capability_path = f"{path}.tool_args.{capability_raw}"
+            try:
+                capability = ToolCapability(capability_raw)
+            except ValueError:
+                errors.append(f"{path}.tool_args.: tool capability: {capability_raw!r} not found")
+                continue 
+            
+            flags = decode_string_list(
+                    flags_raw,
+                    capability_path,
+                    errors,)
+
+            if capability not in toolchain.tools:
+                errors.append(
+                        f"{capability_path}: capability is not provided by toolchain {toolchain.name!r}")
+                continue 
+
+            tool_args[capability] = flags
+
+        if initial_error_count != len(errors):
+            return None 
+
+        return Target(
+                arch=arch,
+                name=name, 
+                output=Path(output),
+                toolchain=toolchain,
+                product=product,
+                sources=tuple(sources),
+                formats=tuple(formats),
+                tool_args=tool_args,)
 
         
