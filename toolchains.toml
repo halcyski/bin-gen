@@ -6,7 +6,7 @@ schema_version = 1
 
 [environments.debian-bookworm-riscv64]
 kind = "container"
-provisioner = "apt"
+package_manager = "apt"
 
 packages = [
 	 "gcc-riscv64-linux-gnu",
