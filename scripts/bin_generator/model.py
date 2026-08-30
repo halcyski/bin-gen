@@ -3,16 +3,11 @@ from collections.abc import Mapping
 from enum import StrEnum
 from pathlib import Path
 
-SCHEMA_VERSION = 1
-
 class EnvironmentKind(StrEnum):
     CONTAINER = "container"
 
 class PackageManager(StrEnum):
     APT = "apt"
-
-class ToolchainConvention(StrEnum):
-    GNU = "gnu"
 
 class ToolCapability(StrEnum):
     COMPILE_C = "compile_c"
@@ -29,9 +24,26 @@ class ArtifactFormat(StrEnum):
 class ProductKind(StrEnum):
     EXECUTABLE = "executable"
 
+class ToolInterface(StrEnum):
+    GNU_CC = "gnu-cc"
+    GNU_OBJCOPY = "gnu-objcopy"
+    GNU_READELF = "gnu-readelf"
+
+class SourceLanguage(StrEnum):
+    C = "c"
+    CXX = "cxx"
+    ASSEMBLY = "assembly"
+    RUST = "rust"
+
+@dataclass(frozen=True)
+class Source:
+    path: Path
+    language: SourceLanguage
+
 
 @dataclass(frozen=True)
 class Tool:
+    interface: ToolInterface 
     command: tuple[str, ...]
     fixed_args: tuple[str, ...]
 
@@ -47,7 +59,6 @@ class Toolchain:
     name: str
     environment: Environment 
     target_triple: str 
-    convention: ToolchainConvention
     tools: Mapping[ToolCapability, Tool]
 
 @dataclass(frozen=True)
@@ -55,8 +66,9 @@ class Target:
     arch: str
     name: str 
     toolchain: Toolchain
+    pipeline: str
     product: ProductKind 
-    sources: tuple[Path, ...]
+    sources: tuple[Source, ...]
     output: Path
     formats: tuple[ArtifactFormat, ...]
     tool_args: Mapping[ToolCapability, tuple[str, ...]]

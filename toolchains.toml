@@ -17,9 +17,9 @@ packages = [
 [toolchains.riscv64-linux]
 environment = "debian-bookworm-riscv64"
 target_triple = "riscv64-linux-gnu"
-convention = "gnu"
 
 [toolchains.riscv64-linux.tools.compile_c]
+interface = "gnu-cc"
 command = ["riscv64-linux-gnu-gcc"]
 fixed_args = [
 	"-march=rv64gc",
@@ -27,6 +27,7 @@ fixed_args = [
 ]
 
 [toolchains.riscv64-linux.tools.link]
+interface = "gnu-cc"
 command = ["riscv64-linux-gnu-gcc"]
 fixed_args = [
 	"-march=rv64gc",
@@ -34,10 +35,12 @@ fixed_args = [
 ]
 
 [toolchains.riscv64-linux.tools.convert_object]
+interface = "gnu-objcopy"
 command = ["riscv64-linux-gnu-objcopy"]
 fixed_args = []
 
 [toolchains.riscv64-linux.tools.inspect_elf]
+interface = "gnu-readelf"
 command = ["riscv64-linux-gnu-readelf"]
 fixed_args = []
 

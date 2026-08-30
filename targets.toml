@@ -2,9 +2,12 @@ schema_version = 1
 
 [target.riscv64.addition]
 toolchain = "riscv64-linux"
+pipeline = "linked-executable"
 product = "executable"
 
-sources = ["src/addition.c"]
+sources = [
+	{ path = "src/addition.c", language = "c"},
+]
 output = "riscv64/addition"
 formats = ["elf", "bin", "ihex", "srec"]
 
@@ -14,9 +17,12 @@ link = ["-Wl,--build-id=sha1"]
 
 [target.riscv64.hello-world]
 toolchain = "riscv64-linux"
+pipeline = "linked-executable"
 product = "executable"
 
-sources = ["src/hello-world.c"]
+sources = [
+	{ path = "src/hello-world.c", language = "c"},
+]
 output = "riscv64/hello-world"
 formats = ["elf", "bin", "ihex", "srec"]
 
