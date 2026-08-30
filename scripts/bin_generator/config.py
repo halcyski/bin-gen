@@ -4,12 +4,14 @@ from .table_reader import (
         ConfigError, 
         TableReader, 
         decode_string_list,
+        load_toml_file,
 )
 
 from .model import (
     ArtifactFormat,
     Environment,
     EnvironmentKind,
+    GeneratorConfig,
     PackageManager,
     ProductKind,
     Target,
@@ -23,9 +25,6 @@ from .model import (
 
 TOOLCHAINS_SCHEMA_VERSION = 1
 TARGETS_SCHEMA_VERSION = 1
-
-
-
 
 class ToolchainSchemaDecoder:
 
@@ -118,7 +117,7 @@ class ToolchainSchemaDecoder:
                 capability = ToolCapability(capability_name)
             except ValueError:
                 errors.append(
-                        f"{path}.{capability_path}: unknown tool capability")
+                        f"{capability_path}: unknown tool capability")
                 continue 
             tools[capability] = self.decode_tool(
                     raw=raw_tool,
@@ -164,7 +163,7 @@ class ToolchainSchemaDecoder:
             manager = PackageManager(manager_raw)
         except ValueError: 
             errors.append(
-                    f"{path}.pacakage_manager: unsupported package manager {manager_raw!r}")
+                    f"{path}.package_manager: unsupported package manager {manager_raw!r}")
         
         if len(errors) != initial_error_count:
             return None
@@ -236,7 +235,7 @@ class TargetSchemaDecoder:
         
         return TargetsConfig(
                 schema_version=schema_version,
-                root=Path(root_path),
+                root=Path(root_path).parent,
                 targets=tuple(targets),
                 )
 
@@ -289,7 +288,8 @@ class TargetSchemaDecoder:
             try:
                 capability = ToolCapability(capability_raw)
             except ValueError:
-                errors.append(f"{path}.tool_args.: tool capability: {capability_raw!r} not found")
+                errors.append(
+                        f"{capability_path}: unknown tool capability")
                 continue 
             
             flags = decode_string_list(
@@ -317,4 +317,21 @@ class TargetSchemaDecoder:
                 formats=tuple(formats),
                 tool_args=tool_args,)
 
-        
+def load_generator_config(
+        targets_path: Path,
+        toolchains_path: Path,
+        ) -> GeneratorConfig:
+    toolchains_raw = load_toml_file(str(toolchains_path))
+    toolchains = ToolchainSchemaDecoder().decode_toolchains(
+            toolchains_raw,
+            toolchains_path,)
+    targets_raw = load_toml_file(str(targets_path))
+    targets = TargetSchemaDecoder(
+            dict(toolchains.toolchains),).decode_targets(targets_raw, str(targets_path),)
+
+    return GeneratorConfig(
+            targets=targets,
+            toolchains=toolchains,
+    )
+
+
