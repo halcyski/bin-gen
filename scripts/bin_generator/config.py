@@ -180,7 +180,7 @@ class ToolchainSchemaDecoder:
             envs: Mapping[str, Environment],
             errors: list[str],
             ) -> Toolchain | None: 
-        initial_error_count = len(errors)
+        checkpoint = ErrorCheckpoint.start(errors)
         reader = TableReader(raw, path, errors)
 
         environment_raw = reader.required_str("environment")
@@ -201,7 +201,7 @@ class ToolchainSchemaDecoder:
                 f"{path}.tools",
                 errors,)
                
-        if len(errors) != initial_error_count:
+        if checkpoint.failed:
             return None 
         assert environment is not None
 
@@ -243,7 +243,7 @@ class ToolchainSchemaDecoder:
             path: str,
             errors: list[str],
             ) -> Environment | None:
-        initial_error_count = len(errors)
+        checkpoint = ErrorCheckpoint.start(errors)
         reader = TableReader(raw, path, errors)
 
         packages = reader.optional_strings("packages")
@@ -258,7 +258,7 @@ class ToolchainSchemaDecoder:
 
         reader.finish()
          
-        if len(errors) != initial_error_count:
+        if checkpoint.failed:
             return None
 
         assert kind is not None
@@ -275,7 +275,7 @@ class ToolchainSchemaDecoder:
             raw: object, 
             path: str,
             errors: list[str]) -> Tool | None:
-        initial_error_count = len(errors)
+        checkpoint = ErrorCheckpoint.start(errors)
         reader = TableReader(raw, path, errors)
         command = reader.required_strings(
                 "command", 
@@ -287,7 +287,7 @@ class ToolchainSchemaDecoder:
         fixed_args = reader.optional_strings("fixed_args")
 
         reader.finish()
-        if len(errors) != initial_error_count:
+        if checkpoint.failed:
             return None
         assert interface is not None
 
@@ -306,7 +306,7 @@ class TargetSchemaDecoder:
             path: str,
             errors: list[str],
             ) -> Source | None:
-        initial_error_count = len(errors)
+        checkpoint = ErrorCheckpoint.start(errors)
         reader = TableReader(raw, path, errors)
 
         source_path = reader.required_str("path")
@@ -316,7 +316,7 @@ class TargetSchemaDecoder:
                 SourceLanguage,)
         reader.finish()
 
-        if len(errors) != initial_error_count:
+        if checkpoint.failed:
             return None
 
         assert language is not None 
@@ -377,7 +377,7 @@ class TargetSchemaDecoder:
             path: str,
             raw: object,
             errors: list[str]) -> Target | None:
-        initial_error_count = len(errors)
+        checkpoint = ErrorCheckpoint.start(errors)
         reader = TableReader(raw, path, errors)
         
         toolchain_raw = reader.required_str("toolchain")
@@ -424,7 +424,7 @@ class TargetSchemaDecoder:
                 toolchain=toolchain, 
                 errors=errors,) 
 
-        if initial_error_count != len(errors):
+        if checkpoint.failed:
             return None
 
         assert product is not None
