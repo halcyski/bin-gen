@@ -1,5 +1,6 @@
-from os import wait
 from pathlib import Path
+from enum import StrEnum 
+from typing import TypeVar 
 
 from .table_reader import (
         ConfigError, 
@@ -21,12 +22,69 @@ from .model import (
     TargetsConfig,
     Tool,
     ToolCapability,
+    ToolInterface,
     Toolchain,
     ToolchainsConfig,
 )
 
+
+EnumT = TypeVar("EnumT", bound=StrEnum)
+
 TOOLCHAINS_SCHEMA_VERSION = 1
 TARGETS_SCHEMA_VERSION = 1
+
+# schema specific decodes for enums and references 
+
+def decode_enum_value(
+        enum_type: type[EnumT],
+        raw: str,
+        path: str,
+        errors: list[str],) -> EnumT | None:
+    if not raw:
+        return None
+
+    try:
+        return enum_type(raw)
+    except ValueError:
+        supported = ", ".join(
+                repr(member.value)
+                for member in enum_type
+                )
+        errors.append(
+                f"{path}: unsupported value {raw!r}; expected one of {supported}")
+        return None
+
+def decode_required_enum(
+        reader: TableReader,
+        key: str,
+        enum_type: type[EnumT],
+        ) -> EnumT | None:
+    raw = reader.required_str(key)
+
+    return decode_enum_value(
+            enum_type,
+            raw,
+            f"{reader.path}.{key}",
+            reader.errors,)
+
+def decode_enum_list(
+        enum_type: type[EnumT],
+        raw_values: tuple[str, ...],
+        path: str,
+        errors: list[str],
+        ) -> tuple[EnumT, ...]:
+    result: list[EnumT] = []
+
+    for index, raw in enumerate(raw_values):
+        value = decode_enum_value(
+                enum_type,
+                raw,
+                f"{path}[{index}]",
+                errors,)
+        if value is not None:
+            result.append(value)
+    return tuple(result)
+
 
 class ToolchainSchemaDecoder:
 
@@ -108,17 +166,20 @@ class ToolchainSchemaDecoder:
         tools: dict[ToolCapability, Tool] = {} 
         for capability_name, raw_tool in tools_raw.items():
             capability_path = f"{path}.tools.{capability_name}"
-            try: 
-                capability = ToolCapability(capability_name)
-            except ValueError:
-                errors.append(
-                        f"{capability_path}: unknown tool capability")
+            capability = decode_enum_value(
+                    ToolCapability,
+                    capability_name,
+                    capability_path,
+                    errors,)
+            if capability is None:
                 continue 
-            tools[capability] = self.decode_tool(
+            tool = self.decode_tool(
                     raw=raw_tool,
                     path=capability_path,
                     errors=errors,)
-
+            if tool is not None: 
+                tools[capability] = tool 
+        
         if len(errors) != initial_error_count:
             return None 
 
@@ -139,26 +200,12 @@ class ToolchainSchemaDecoder:
         initial_error_count = len(errors)
         reader = TableReader(raw, path, errors)
 
-        kind_raw = reader.required_str("kind")
-        manager_raw = reader.required_str("package_manager")
         packages = reader.optional_strings("packages")
+        kind = decode_required_enum(reader, "kind", EnvironmentKind)
+        manager = decode_required_enum(reader, "package_manager", PackageManager)
+
         reader.finish()
-
-        kind: EnvironmentKind | None = None
-        manager: PackageManager | None = None 
-        
-        try:
-            kind = EnvironmentKind(kind_raw)
-        except ValueError:
-            errors.append(
-                    f"{path}.kind: unsupported environment kind: {kind_raw!r}")
-
-        try:
-            manager = PackageManager(manager_raw)
-        except ValueError: 
-            errors.append(
-                    f"{path}.package_manager: unsupported package manager {manager_raw!r}")
-        
+         
         if len(errors) != initial_error_count:
             return None
 
@@ -175,12 +222,18 @@ class ToolchainSchemaDecoder:
             self,
             raw: object, 
             path: str,
-            errors: list[str]) -> Tool:
+            errors: list[str]) -> Tool | None:
+        initial_error_count = len(errors)
         reader = TableReader(raw, path, errors)
         command = reader.required_strings("command", min_items=1,)
+        interface = decode_required_enum(reader, "interface", ToolInterface)
         fixed_args = reader.optional_strings("fixed_args")
-        interface = reader.required_str("interface")
+
         reader.finish()
+        if len(errors) != initial_error_count:
+            return None
+        assert interface is not None
+
         return Tool(
                 interface=interface,
                 command=command,
@@ -247,12 +300,20 @@ class TargetSchemaDecoder:
         reader = TableReader(raw, path, errors)
         
         toolchain_raw = reader.required_str("toolchain")
-        product_raw = reader.required_str("product")
+        product = decode_required_enum(
+                reader,
+                "product", 
+                ProductKind,)
+        pipeline = reader.required_str("pipeline")
         sources_raw = reader.required_table_list("sources")
         output = reader.required_str("output")
-        formats_raw = reader.required_strings("formats")
+        formats = decode_enum_list(
+                ArtifactFormat,
+                reader.required_strings("formats"),
+                f"{path}.formats",
+                errors,)
         tool_args_raw = reader.optional_table("tool_args")
-        
+         
         reader.finish()
         
         try:
@@ -262,16 +323,12 @@ class TargetSchemaDecoder:
                     f"{path}.toolchain: unknown toolchain specified: {toolchain_raw!r}")
             return None 
     
-        try: 
-            product = ProductKind(product_raw)
-        except ValueError:
-            errors.append(f"{path}.product: unknown product kind: {product_raw!r}")
-       
+
         sources: list[Source] = []
         
         for index, raw_source in enumerate(sources_raw):
             source_path = f"{path}.sources[{index}]"
-            initial_error_count = len(errors)
+            source_error_count = len(errors)
 
             source_reader = TableReader(
                     raw=raw_source,
@@ -279,44 +336,33 @@ class TargetSchemaDecoder:
                     errors=errors,
                     )
             path_raw = source_reader.required_str("path")
-            language_raw = source_reader.required_str("language")
+            language = decode_required_enum(
+                    source_reader,
+                    "language",
+                    SourceLanguage,)
             source_reader.finish()
 
-            try:
-                language = SourceLanguage(language_raw)
-            except ValueError:
-                errors.append(
-                        f"{source_path}.language: unsupported source language: {language_raw!r}")
+            if len(errors) != source_error_count or language is None:
                 continue 
-            if len(errors) != initial_error_count:
-                continue 
-
+             
             sources.append(
                     Source(
                         path=Path(path_raw),
                         language=language,
                         ))
 
-
-        formats: list[ArtifactFormat] = [] 
-        for fmt in formats_raw:
-            try: 
-                format = ArtifactFormat(fmt)
-            except ValueError:
-                errors.append(f"{path}.formats: unknown format: {fmt!r}")
-                continue 
-            formats.append(format)
-
         tool_args: dict[ToolCapability, tuple[str, ...]] = {}
-        for capability_raw, flags_raw in tool_args_raw.items():
-            capability_path = f"{path}.tool_args.{capability_raw}"
-            try:
-                capability = ToolCapability(capability_raw)
-            except ValueError:
-                errors.append(
-                        f"{capability_path}: unknown tool capability")
-                continue 
-            
+        for capability_name, flags_raw in tool_args_raw.items():
+            capability_path = f"{path}.tool_args.{capability_name}"
+            capability = decode_enum_value(
+                    ToolCapability, 
+                    capability_name, 
+                    capability_path, 
+                    errors,)
+
+            if capability is None:
+                continue
+
             flags = decode_string_list(
                     flags_raw,
                     capability_path,
@@ -330,13 +376,16 @@ class TargetSchemaDecoder:
             tool_args[capability] = flags
 
         if initial_error_count != len(errors):
-            return None 
+            return None
+
+        assert product is not None
 
         return Target(
                 arch=arch,
                 name=name, 
                 output=Path(output),
                 toolchain=toolchain,
+                pipeline=pipeline,
                 product=product,
                 sources=tuple(sources),
                 formats=tuple(formats),
