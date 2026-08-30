@@ -1,6 +1,10 @@
 import tomllib
 from typing import TypeAlias
 
+
+TomlTable: TypeAlias = dict[str, object]
+
+
 class ConfigError(Exception):
     def __init__(self, errors: list[str]) -> None:
         self.errors = tuple(errors)
@@ -42,7 +46,37 @@ def decode_string_list(
         result.append(item)
     return tuple(result)
 
-TomlTable: TypeAlias = dict[str, object]
+def decode_table_list(
+    raw: object,
+    path: str,
+    errors: list[str],
+    *,
+    min_items: int = 0,) -> tuple[TomlTable, ...]:
+       if not isinstance(raw, list):
+           errors.append(f"{path}: expected list of tables")
+           return ()
+
+       if len(raw) < min_items:
+           errors.append(
+               f"{path}: expected at least {min_items} item(s)"
+           )
+           return ()
+
+       result: list[TomlTable] = []
+
+       for index, item in enumerate(raw):
+           if not isinstance(item, dict):
+               errors.append(
+                   f"{path}[{index}]: expected table"
+               )
+               continue
+
+           result.append(item)
+
+       return tuple(result)
+        
+
+
 
 _MISSING = object()
 
@@ -70,6 +104,24 @@ class TableReader:
             self.errors.append(f"{self.path}.{key}: required field")
             return _MISSING 
         return self.values[key]
+
+    def required_table_list(
+            self,
+            key:str,
+            *,
+            min_items: int = 1,
+            ) -> tuple[TomlTable, ...]:
+        value = self._required_value(key)
+
+        if value is _MISSING:
+            return ()
+
+        return decode_table_list(
+                value, 
+                f"{self.path}.{key}",
+                self.errors,
+                min_items=min_items,)
+
 
     def decode_strings(
         self,
