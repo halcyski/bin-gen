@@ -1,8 +1,22 @@
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Mapping, Protocol
 
-from .model import ArtifactFormat, Target
+from .model import (
+        ArtifactFormat,
+        Source, 
+        Target, 
+        Tool,
+        ToolCapability,
+        ToolInterface,
+)
+
+ARTIFACT_EXTENSIONS = {
+       ArtifactFormat.ELF: ".elf",
+       ArtifactFormat.BINARY: ".bin",
+       ArtifactFormat.INTEL_HEX: ".hex",
+       ArtifactFormat.S_RECORD: ".srec",
+}
 
 class PlanningError(Exception):
     ...
@@ -52,4 +66,89 @@ class ArtifactStage(Protocol):
             product: StageResult,
             ) -> StageResult:
         ...
+
+def require_tool(context: PlanningContext, capability: ToolCapability) -> Tool:
+    tools: Mapping[ToolCapability, Tool] = context.target.toolchain.tools 
+    tool = tools.get(capability)
+    if tool is None:
+        raise PlanningError(
+                f"{context.target.id}: toolchain {context.target.toolchain.name!r} does not provide capability {capability.value!r}")
+    return tool 
+
+def tool_args(context: PlanningContext, capability: ToolCapability) -> tuple[str, ...]: 
+    return context.target.tool_args.get(capability, ())
+
+def object_path(context: PlanningContext, source: Source) -> Path:
+    return context.target.output.parent / "obj" / f"{source.path.stem}.o"
+
+def artifact_path(context: PlanningContext, format: ArtifactFormat) -> Path: 
+    return context.target.output.with_suffix(ARTIFACT_EXTENSIONS[format])
+
+class GnuCcAdapter:
+    def compile_c(
+            self,
+            tool: Tool,
+            source: Path,
+            output: Path,
+            args: tuple[str, ...]
+            ) -> Command:
+        if tool.interface is not ToolInterface.GNU_CC:
+            raise PlanningError(
+                    f"tool interface {tool.interface!r} is incompatible with gnu-cc adapter"
+                    )
+        return Command((
+            *tool.command,
+            *tool.fixed_args,
+            *args,
+            "-c",
+            str(source),
+            "-o",
+            str(output),))
+         
+    def link(
+            self,
+            tool: Tool,
+            objects: tuple[Path, ...],
+            output: Path,
+            args: tuple[str, ...],
+            ) -> Command:
+        if tool.interface is not ToolInterface.GNU_CC:
+            raise PlanningError(
+                    f"tool interface {tool.interface!r} is incompatible with gnu-cc adapter"
+                    )
+        return Command((
+            *tool.command,
+            *tool.fixed_args,
+            *args,
+            *(str(path) for path in objects),
+            "-o",
+            str(output),))
+
+class GnuObjcopyAdapter:
+    def convert_object(
+            self,
+            tool: Tool,
+            source: Path,
+            output: Path,
+            output_format: str, 
+            args: tuple[str, ...]
+            ) -> Command:
+        if tool.interface is not ToolInterface.GNU_OBJCOPY:
+            raise PlanningError(
+                    f"tool interface {tool.interface!r} is incompatible with gnu-objcopy adapter"
+                    )
+        return Command((
+            *tool.command,
+            *tool.fixed_args,
+            *args,
+            "-O",
+            output_format,
+            str(source),
+            str(output),))
+
+ADAPTERS = {
+    ToolInterface.GNU_CC: GnuCcAdapter(),
+    ToolInterface.GNU_OBJCOPY: GnuObjcopyAdapter(),
+}
+
 
