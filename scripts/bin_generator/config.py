@@ -1,6 +1,7 @@
 from pathlib import Path
 from enum import StrEnum 
 from typing import TypeVar 
+from collections.abc import Mapping
 
 from .table_reader import (
         ConfigError, 
@@ -29,11 +30,29 @@ from .model import (
 
 
 EnumT = TypeVar("EnumT", bound=StrEnum)
+ReferenceT = TypeVar("ReferenceT")
 
 TOOLCHAINS_SCHEMA_VERSION = 1
 TARGETS_SCHEMA_VERSION = 1
 
 # schema specific decodes for enums and references 
+
+def resolve_reference(
+        values: Mapping[str, ReferenceT],
+        name: str,
+        path: str,
+        kind: str,
+        errors: list[str],) -> ReferenceT | None:
+    if not name:
+        return None
+    value = values.get(name)
+
+    if value is None:
+        errors.append(
+                f"{path}: unknown {kind} {name!r}"
+                )
+    return value 
+
 
 def decode_enum_value(
         enum_type: type[EnumT],
@@ -143,7 +162,7 @@ class ToolchainSchemaDecoder:
             name: str,
             raw: object,
             path: str,
-            envs: dict[str, Environment],
+            envs: Mapping[str, Environment],
             errors: list[str],
             ) -> Toolchain | None: 
         initial_error_count = len(errors)
@@ -154,13 +173,13 @@ class ToolchainSchemaDecoder:
         tools_raw = reader.required_table("tools")
 
         reader.finish()
-
-        try:
-            environment = envs[environment_raw]
-        except KeyError:
-            errors.append(
-                    f"{path}.environment: unknown environment")
-            return None 
+        
+        environment = resolve_reference(
+                envs, 
+                environment_raw,
+                f"{path}.environment",
+                "environment",
+                errors,)
 
 
         tools: dict[ToolCapability, Tool] = {} 
@@ -182,6 +201,7 @@ class ToolchainSchemaDecoder:
         
         if len(errors) != initial_error_count:
             return None 
+        assert environment is not None
 
         return Toolchain(
                 name=name, 
@@ -201,8 +221,14 @@ class ToolchainSchemaDecoder:
         reader = TableReader(raw, path, errors)
 
         packages = reader.optional_strings("packages")
-        kind = decode_required_enum(reader, "kind", EnvironmentKind)
-        manager = decode_required_enum(reader, "package_manager", PackageManager)
+        kind = decode_required_enum(
+                reader, 
+                "kind", 
+                EnvironmentKind,)
+        manager = decode_required_enum(
+                reader, 
+                "package_manager", 
+                PackageManager,)
 
         reader.finish()
          
@@ -225,8 +251,13 @@ class ToolchainSchemaDecoder:
             errors: list[str]) -> Tool | None:
         initial_error_count = len(errors)
         reader = TableReader(raw, path, errors)
-        command = reader.required_strings("command", min_items=1,)
-        interface = decode_required_enum(reader, "interface", ToolInterface)
+        command = reader.required_strings(
+                "command", 
+                min_items=1,)
+        interface = decode_required_enum(
+                reader, 
+                "interface", 
+                ToolInterface,)
         fixed_args = reader.optional_strings("fixed_args")
 
         reader.finish()
@@ -240,7 +271,7 @@ class ToolchainSchemaDecoder:
                 fixed_args=fixed_args,)
 
 class TargetSchemaDecoder:
-    def __init__(self, toolchains: dict[str, Toolchain]):
+    def __init__(self, toolchains: Mapping[str, Toolchain]):
         self.toolchains = toolchains 
 
     def decode_targets(
@@ -315,15 +346,13 @@ class TargetSchemaDecoder:
         tool_args_raw = reader.optional_table("tool_args")
          
         reader.finish()
-        
-        try:
-            toolchain: Toolchain = self.toolchains[toolchain_raw]
-        except KeyError:
-            errors.append(
-                    f"{path}.toolchain: unknown toolchain specified: {toolchain_raw!r}")
-            return None 
+        toolchain = resolve_reference(
+                self.toolchains,
+                toolchain_raw,
+                f"{path}.toolchain",
+                "toolchain",
+                errors,) 
     
-
         sources: list[Source] = []
         
         for index, raw_source in enumerate(sources_raw):
@@ -367,6 +396,9 @@ class TargetSchemaDecoder:
                     flags_raw,
                     capability_path,
                     errors,)
+            
+            if toolchain is None:
+                continue 
 
             if capability not in toolchain.tools:
                 errors.append(
@@ -379,6 +411,7 @@ class TargetSchemaDecoder:
             return None
 
         assert product is not None
+        assert toolchain is not None
 
         return Target(
                 arch=arch,
@@ -401,7 +434,8 @@ def load_generator_config(
             toolchains_path,)
     targets_raw = load_toml_file(str(targets_path))
     targets = TargetSchemaDecoder(
-            dict(toolchains.toolchains),).decode_targets(targets_raw, str(targets_path),)
+            toolchains.toolchains
+            ).decode_targets(targets_raw, str(targets_path),)
 
     return GeneratorConfig(
             targets=targets,
