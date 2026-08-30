@@ -1,3 +1,4 @@
+from os import wait
 from pathlib import Path
 
 from .table_reader import (
@@ -14,12 +15,13 @@ from .model import (
     GeneratorConfig,
     PackageManager,
     ProductKind,
+    Source,
+    SourceLanguage,
     Target,
     TargetsConfig,
     Tool,
     ToolCapability,
     Toolchain,
-    ToolchainConvention,
     ToolchainsConfig,
 )
 
@@ -91,7 +93,6 @@ class ToolchainSchemaDecoder:
 
         environment_raw = reader.required_str("environment")
         target_triple = reader.required_str("target_triple")
-        convention_raw = reader.required_str("convention")
         tools_raw = reader.required_table("tools")
 
         reader.finish()
@@ -101,12 +102,6 @@ class ToolchainSchemaDecoder:
         except KeyError:
             errors.append(
                     f"{path}.environment: unknown environment")
-            return None 
-
-        try:
-            convention = ToolchainConvention(convention_raw)
-        except ValueError:
-            errors.append(f"{path}.convention: unknown convention: {convention_raw!r}")
             return None 
 
 
@@ -131,7 +126,6 @@ class ToolchainSchemaDecoder:
                 name=name, 
                 environment=environment,
                 target_triple=target_triple,
-                convention=convention,
                 tools=tools,)
 
 
@@ -185,8 +179,10 @@ class ToolchainSchemaDecoder:
         reader = TableReader(raw, path, errors)
         command = reader.required_strings("command", min_items=1,)
         fixed_args = reader.optional_strings("fixed_args")
+        interface = reader.required_str("interface")
         reader.finish()
         return Tool(
+                interface=interface,
                 command=command,
                 fixed_args=fixed_args,)
 
@@ -252,7 +248,7 @@ class TargetSchemaDecoder:
         
         toolchain_raw = reader.required_str("toolchain")
         product_raw = reader.required_str("product")
-        sources_raw = reader.required_strings("sources")
+        sources_raw = reader.required_table_list("sources")
         output = reader.required_str("output")
         formats_raw = reader.required_strings("formats")
         tool_args_raw = reader.optional_table("tool_args")
@@ -270,9 +266,38 @@ class TargetSchemaDecoder:
             product = ProductKind(product_raw)
         except ValueError:
             errors.append(f"{path}.product: unknown product kind: {product_raw!r}")
+       
+        sources: list[Source] = []
         
-        sources = tuple(Path(source) for source in sources_raw)
-        
+        for index, raw_source in enumerate(sources_raw):
+            source_path = f"{path}.sources[{index}]"
+            initial_error_count = len(errors)
+
+            source_reader = TableReader(
+                    raw=raw_source,
+                    path=source_path,
+                    errors=errors,
+                    )
+            path_raw = source_reader.required_str("path")
+            language_raw = source_reader.required_str("language")
+            source_reader.finish()
+
+            try:
+                language = SourceLanguage(language_raw)
+            except ValueError:
+                errors.append(
+                        f"{source_path}.language: unsupported source language: {language_raw!r}")
+                continue 
+            if len(errors) != initial_error_count:
+                continue 
+
+            sources.append(
+                    Source(
+                        path=Path(path_raw),
+                        language=language,
+                        ))
+
+
         formats: list[ArtifactFormat] = [] 
         for fmt in formats_raw:
             try: 
