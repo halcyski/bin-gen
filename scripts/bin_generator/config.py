@@ -2,7 +2,7 @@ from pathlib import Path
 from enum import StrEnum 
 from typing import TypeVar 
 from collections.abc import Mapping
-
+from dataclasses import dataclass
 from .table_reader import (
         ConfigError, 
         TableReader, 
@@ -28,6 +28,21 @@ from .model import (
     ToolchainsConfig,
 )
 
+@dataclass(frozen=True)
+class ErrorCheckpoint:
+    errors: list[str]
+    initial_count: int
+
+    @classmethod 
+    def start(
+            cls,
+            errors: list[str],
+            ) -> "ErrorCheckpoint":
+        return cls(errors, len(errors))
+
+    @property
+    def failed(self) -> bool:
+        return len(self.errors) != self.initial_count
 
 EnumT = TypeVar("EnumT", bound=StrEnum)
 ReferenceT = TypeVar("ReferenceT")
@@ -181,10 +196,31 @@ class ToolchainSchemaDecoder:
                 "environment",
                 errors,)
 
+        tools = self.decode_tools(
+                tools_raw,
+                f"{path}.tools",
+                errors,)
+               
+        if len(errors) != initial_error_count:
+            return None 
+        assert environment is not None
 
-        tools: dict[ToolCapability, Tool] = {} 
-        for capability_name, raw_tool in tools_raw.items():
-            capability_path = f"{path}.tools.{capability_name}"
+        return Toolchain(
+                name=name, 
+                environment=environment,
+                target_triple=target_triple,
+                tools=tools,)
+
+    def decode_tools(
+            self,
+            raw: Mapping[str, object],
+            path: str,
+            errors: list[str],
+            ) -> dict[ToolCapability, Tool]:
+        tools: dict[ToolCapability, Tool] = {}
+
+        for capability_name, raw_tool in raw.items():
+            capability_path = f"{path}.{capability_name}"
             capability = decode_enum_value(
                     ToolCapability,
                     capability_name,
@@ -198,17 +234,7 @@ class ToolchainSchemaDecoder:
                     errors=errors,)
             if tool is not None: 
                 tools[capability] = tool 
-        
-        if len(errors) != initial_error_count:
-            return None 
-        assert environment is not None
-
-        return Toolchain(
-                name=name, 
-                environment=environment,
-                target_triple=target_triple,
-                tools=tools,)
-
+        return tools
 
     def decode_environment(
             self,
@@ -272,7 +298,32 @@ class ToolchainSchemaDecoder:
 
 class TargetSchemaDecoder:
     def __init__(self, toolchains: Mapping[str, Toolchain]):
-        self.toolchains = toolchains 
+        self.toolchains = toolchains
+
+    def decode_source(
+            self,
+            raw: object,
+            path: str,
+            errors: list[str],
+            ) -> Source | None:
+        initial_error_count = len(errors)
+        reader = TableReader(raw, path, errors)
+
+        source_path = reader.required_str("path")
+        language = decode_required_enum(
+                reader,
+                "language",
+                SourceLanguage,)
+        reader.finish()
+
+        if len(errors) != initial_error_count:
+            return None
+
+        assert language is not None 
+
+        return Source(
+                path=Path(source_path),
+                language=language,)
 
     def decode_targets(
             self, 
@@ -319,7 +370,6 @@ class TargetSchemaDecoder:
                 targets=tuple(targets),
                 )
 
-
     def decode_target(
             self,
             arch: str,
@@ -357,32 +407,51 @@ class TargetSchemaDecoder:
         
         for index, raw_source in enumerate(sources_raw):
             source_path = f"{path}.sources[{index}]"
-            source_error_count = len(errors)
-
-            source_reader = TableReader(
-                    raw=raw_source,
+            
+            source = self.decode_source(
+                    raw_source,
                     path=source_path,
-                    errors=errors,
-                    )
-            path_raw = source_reader.required_str("path")
-            language = decode_required_enum(
-                    source_reader,
-                    "language",
-                    SourceLanguage,)
-            source_reader.finish()
+                    errors=errors,)
 
-            if len(errors) != source_error_count or language is None:
+            if source is None:
                 continue 
-             
-            sources.append(
-                    Source(
-                        path=Path(path_raw),
-                        language=language,
-                        ))
+
+            sources.append(source)
+
+        tool_args = self.decode_tool_args(
+                raw=tool_args_raw,
+                path=f"{path}.tool_args",
+                toolchain=toolchain, 
+                errors=errors,) 
+
+        if initial_error_count != len(errors):
+            return None
+
+        assert product is not None
+        assert toolchain is not None
+
+        return Target(
+                arch=arch,
+                name=name, 
+                output=Path(output),
+                toolchain=toolchain,
+                pipeline=pipeline,
+                product=product,
+                sources=tuple(sources),
+                formats=tuple(formats),
+                tool_args=tool_args,)
+
+    def decode_tool_args(
+            self,
+            raw: Mapping[str, object],
+            path: str,
+            toolchain: Toolchain | None,
+            errors: list[str],
+            ) -> dict[ToolCapability, tuple[str, ...]]:
 
         tool_args: dict[ToolCapability, tuple[str, ...]] = {}
-        for capability_name, flags_raw in tool_args_raw.items():
-            capability_path = f"{path}.tool_args.{capability_name}"
+        for capability_name, flags_raw in raw.items():
+            capability_path = f"{path}.{capability_name}"
             capability = decode_enum_value(
                     ToolCapability, 
                     capability_name, 
@@ -406,23 +475,7 @@ class TargetSchemaDecoder:
                 continue 
 
             tool_args[capability] = flags
-
-        if initial_error_count != len(errors):
-            return None
-
-        assert product is not None
-        assert toolchain is not None
-
-        return Target(
-                arch=arch,
-                name=name, 
-                output=Path(output),
-                toolchain=toolchain,
-                pipeline=pipeline,
-                product=product,
-                sources=tuple(sources),
-                formats=tuple(formats),
-                tool_args=tool_args,)
+        return tool_args
 
 def load_generator_config(
         targets_path: Path,
