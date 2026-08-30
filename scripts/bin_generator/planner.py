@@ -4,7 +4,8 @@ from typing import Mapping, Protocol
 
 from .model import (
         ArtifactFormat,
-        Source, 
+        Source,
+        SourceLanguage, 
         Target, 
         Tool,
         ToolCapability,
@@ -151,4 +152,30 @@ ADAPTERS = {
     ToolInterface.GNU_OBJCOPY: GnuObjcopyAdapter(),
 }
 
+class CompileStage:
+    def plan_sources(self, context: PlanningContext) -> StageResult:
+        tool = require_tool(context, ToolCapability.COMPILE_C)
+        args = tool_args(context, ToolCapability.COMPILE_C)
+        
+        files: list[PlannedFile] = []
+        commands: list[Command] = []
+
+        for source in context.target.sources:
+                if source.language is not SourceLanguage.C:
+                    raise PlanningError(
+                            f"{context.target.id}: unsupported source language {source.language.value!r} for {source.path}")
+                output = object_path(context, source)
+                adapter = ADAPTERS.get(tool.interface)
+                if not isinstance(adapter, GnuCcAdapter):
+                    raise PlanningError("{context.target.id}: capability {ToolCapability.COMPILE_C.value!r} requires gnu-cc compatible adapter, got {tool.interface.value!r}")
+                command = adapter.compile_c(
+                        tool,
+                        source.path,
+                        output,
+                        args,)
+
+                files.append(PlannedFile(output))
+                commands.append(command)
+
+        return StageResult(tuple(files), tuple(commands))
 
