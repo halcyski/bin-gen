@@ -207,4 +207,19 @@ class LinkStage:
                 files=(PlannedFile(output, ArtifactFormat.ELF),),
                 commands=(command,),)
 
+class IdentityArtifaceStage:
+    def plan_artifacts(
+            self,
+            context: PlanningContext,
+            product: StageResult,
+            ) -> StageResult:
+        # equivalent of stub if not ELF 
+        if ArtifactFormat.ELF not in context.target.formats:
+            return StageResult(files=(), commands=())
+        
+        for file in product.files:
+            if file.format is ArtifactFormat.ELF:
+                return StageResult(files=(file,), commands=())
+
+        raise PlanningError(f"{context.target.id}: product stage did not produce ELF")
 
